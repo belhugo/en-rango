@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Bloquea cualquier conexión de red (fetch/XHR/WebSocket) desde esta página: los datos no pueden salir. -->
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">
+<title>En Rango · Informe personalizado de glucosa</title>
+<meta name="description" content="Visualizá los datos de LibreView por el período que quieras: tiempo en rango, patrón de glucosa y calendario. Todo se procesa en tu navegador.">
+<meta name="theme-color" content="#14213D">
+<meta property="og:type" content="website">
+<meta property="og:title" content="En Rango · Informe personalizado de glucosa">
+<meta property="og:description" content="Cargá tu CSV de LibreView y mirá meses de datos, no solo 90 días. Todo se procesa en tu navegador.">
+<meta property="og:url" content="https://enrango.netlify.app/">
+<meta property="og:locale" content="es_AR">
+<meta property="og:image" content="https://enrango.netlify.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="En Rango: informe personalizado de glucosa">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='20' fill='%2314213D'/%3E%3Cpath d='M6 24c4 0 4-9 8-9s4 12 8 12 4-14 8-14 2 11 4 11' fill='none' stroke='%235EEAD4' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+  .fd { font-family: 'Bricolage Grotesque', 'Arial Black', system-ui, sans-serif; letter-spacing: -.02em; }
+  :focus-visible { outline: 3px solid #6366F1; outline-offset: 2px; }
+  button:disabled { opacity: .35; cursor: default; }
+  .sel { outline: 3px solid #14213D; outline-offset: 1px; }
+  .q, .chip { background: #f1f5f9; } .q:hover, .chip:hover { background: #e2e8f0; } .q.on, .q.on:hover { background: #14213D; color: #fff; }
+  .sensor { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; color: #5EEAD4; font-size: 1.15rem; font-weight: 800;
+    background: radial-gradient(circle at 35% 30%, #3b4a8f, #14213D 70%); box-shadow: 0 0 0 6px #E3E9F6, 0 0 0 7px #c3cde6; transition: transform .35s; }
+  @media (min-width: 768px) { .sensor { width: 140px; height: 140px; font-size: 1.5rem; box-shadow: 0 0 0 10px #E3E9F6, 0 0 0 11px #c3cde6; } }
+  #drop.over { border-color: #6366F1; background: #f5f6ff; }
+  #drop.over .sensor { transform: scale(1.1) rotate(-10deg); }
+  .print-only { display: none; }
+  @media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none !important; }
+    canvas { max-width: 100% !important; }
+    .print-only { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    body { background: #fff !important; }
+    #dash > section, .month { break-inside: avoid; }
+    #dash > #calSection { break-inside: auto; }
+    #calSection > div:first-child, #calLegend { break-after: avoid; }
+  }
+</style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col" style="background:#EEF2F6;font-family:'Instrument Sans',system-ui,sans-serif">
+<div class="max-w-6xl mx-auto w-full flex-1 px-4 py-4 md:py-6 space-y-4 md:space-y-6">
+
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="20" fill="#14213D"/><path d="M6 24c4 0 4-9 8-9s4 12 8 12 4-14 8-14 2 11 4 11" fill="none" stroke="#5EEAD4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><h1 class="fd text-2xl font-extrabold leading-none" style="color:#14213D">En Rango</h1><p class="text-sm text-slate-500">Informe personalizado de glucosa</p></div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="no-print inline-flex items-center gap-2 rounded-full text-white text-sm px-4 py-2" style="background:#14213D"><span class="w-2 h-2 rounded-full bg-emerald-400"></span>Los datos no salen de este dispositivo</span>
+      <button id="btnCopy" class="no-print hidden px-3 py-2 text-sm rounded-full border border-slate-300 bg-white hover:bg-slate-100">Copiar resumen</button>
+      <button id="btnPrint" class="no-print hidden px-3 py-2 text-sm rounded-full border border-slate-300 bg-white hover:bg-slate-100">Imprimir / PDF</button>
+      <button id="btnReset" class="no-print hidden px-3 py-2 text-sm rounded-full border border-slate-300 bg-white hover:bg-slate-100">Cargar otro archivo</button>
+    </div>
+  </header>
+
+  <section id="upload" class="no-print">
+    <label id="drop" for="file" class="grid md:grid-cols-[auto_1fr] gap-4 md:gap-8 items-center justify-items-center md:justify-items-start text-center md:text-left cursor-pointer rounded-[28px] border-2 border-dashed border-slate-300 bg-white p-5 md:p-12 transition">
+      <div class="sensor fd" aria-hidden="true">CSV</div>
+      <div>
+        <h2 class="fd text-3xl md:text-5xl font-extrabold leading-tight" style="color:#14213D">Soltá acá tu archivo</h2>
+        <p class="mt-3 text-slate-600 max-w-prose">O hacé clic para elegirlo. Sin tope de 90 días.</p>
+        <p class="mt-3 text-sm text-slate-500 max-w-prose">Todo se procesa en tu navegador. Ningún dato clínico se guarda ni se envía. Funciona con el .csv que exportás de LibreView.</p>
+      </div>
+      <input id="file" type="file" accept=".csv,text/csv" class="hidden">
+    </label>
+    <div class="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm">
+      <button id="btnDemo" class="px-4 py-2 rounded-full border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-100">Probar con datos de ejemplo</button>
+      <span id="err" class="text-red-600"></span>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <main id="dash" class="hidden space-y-6">
+
+    <div class="no-print grid lg:grid-cols-3 gap-4">
+      <section class="lg:col-span-2 rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
+        <div class="flex flex-wrap items-end gap-4">
+          <div><label class="block text-xs text-slate-500 mb-1">Desde</label><input id="from" type="date" class="border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Hasta</label><input id="to" type="date" class="border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+          <div class="flex flex-wrap gap-2" id="quick">
+            <button data-d="14" class="q px-3 py-2 text-sm rounded-lg">14 días</button>
+            <button data-d="30" class="q px-3 py-2 text-sm rounded-lg">30 días</button>
+            <button data-d="90" class="q px-3 py-2 text-sm rounded-lg">90 días</button>
+            <button data-d="180" class="q px-3 py-2 text-sm rounded-lg">6 meses</button>
+            <button data-d="365" class="q px-3 py-2 text-sm rounded-lg">1 año</button>
+            <button data-d="0" class="q on px-3 py-2 text-sm rounded-lg">Todo</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-slate-600">
+          <label class="flex items-center gap-2"><input id="scans" type="checkbox" class="rounded"> Incluir escaneos manuales</label>
+          <label class="flex items-center gap-2">Formato de fecha
+            <select id="fmt" class="border border-slate-300 rounded-lg px-2 py-1">
+              <option value="auto">Automático</option><option value="dmy">DD-MM-AAAA</option><option value="mdy">MM-DD-AAAA</option>
+            </select>
+          </label>
+        </div>
+      </section>
+      <section class="rounded-2xl bg-white border border-slate-200 p-4">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-sm font-medium text-slate-700">Rangos (mg/dL)</h2>
+          <button id="tReset" class="chip hidden px-3 py-1 text-sm rounded-lg">Restablecer</button>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label for="tLo" class="block text-xs text-slate-500 mb-1">Objetivo desde</label><input id="tLo" type="number" min="20" max="600" step="1" value="70" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+          <div><label for="tHi" class="block text-xs text-slate-500 mb-1">Objetivo hasta</label><input id="tHi" type="number" min="20" max="600" step="1" value="180" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+          <div><label for="tVl" class="block text-xs text-slate-500 mb-1">Muy bajo &lt;</label><input id="tVl" type="number" min="20" max="600" step="1" value="54" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+          <div><label for="tVh" class="block text-xs text-slate-500 mb-1">Muy alto &gt;</label><input id="tVh" type="number" min="20" max="600" step="1" value="250" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"></div>
+        </div>
+        <p id="tErr" class="mt-2 text-sm text-red-600"></p>
+      </section>
+    </div>
+
+    <section class="rounded-[28px] p-6 md:p-10 text-white" style="background:#14213D">
+      <p class="flex flex-wrap justify-between gap-x-4 text-indigo-200"><span>Período: <span id="periodo"></span></span><span id="unitNote" class="text-indigo-300">Valores en mg/dL</span></p>
+      <div class="mt-2 flex flex-wrap items-end gap-x-8 gap-y-2">
+        <div class="fd font-extrabold leading-none" style="font-size:clamp(5rem,16vw,10rem);color:#5EEAD4"><span id="bigNum">0</span><span style="font-size:.4em">%</span></div>
+        <div class="pb-2"><p id="verdict" class="max-w-md text-lg md:text-xl text-indigo-50"></p><p id="cmp" class="mt-1 max-w-md text-sm text-indigo-200"></p></div>
+      </div>
+      <div id="tube" class="mt-8 flex h-16 rounded-full overflow-hidden bg-white/10"></div>
+      <div id="legend" class="mt-5 grid md:grid-cols-[2fr_1fr_2fr] gap-x-6 gap-y-6 text-sm"></div>
+    </section>
+
+    <section id="kpis" class="grid grid-cols-2 md:grid-cols-4 rounded-2xl bg-white border border-slate-200 divide-x divide-y md:divide-y-0 divide-slate-200 overflow-hidden"></section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 p-4">
+      <h2 class="fd text-xl font-bold">Patrón de glucosa</h2>
+      <div style="height:360px"><canvas id="cAgp"></canvas></div>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 p-4">
+      <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 mb-3">
+        <h2 class="fd text-xl font-bold">Momentos del día</h2>
+        <span class="text-sm text-slate-500 whitespace-nowrap">Promedio en mg/dL</span>
+      </div>
+      <div id="blocks" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+    </section>
+
+    <section class="rounded-2xl bg-white border border-slate-200 p-4">
+      <h2 class="fd text-xl font-bold">Tendencia diaria</h2>
+      <div style="height:300px"><canvas id="cDay"></canvas></div>
+    </section>
+
+    <section id="calSection" class="rounded-2xl bg-white border border-slate-200 p-4">
+      <div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 mb-3">
+        <div>
+          <h2 class="fd text-xl font-bold">Calendario</h2>
+          <p class="no-print text-sm text-slate-500">Tocá un día para ver su curva</p>
+        </div>
+        <span class="text-sm text-slate-500 whitespace-nowrap">Valores en mg/dL</span>
+      </div>
+      <div id="calLegend" class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 mb-4"></div>
+      <div class="no-print flex items-center justify-between mb-2">
+        <button id="calPrev" class="w-11 h-11 rounded-full border border-slate-300 grid place-items-center hover:bg-slate-100" aria-label="Mes anterior"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <span id="calTitle" class="text-sm text-slate-500"></span>
+        <button id="calNext" class="w-11 h-11 rounded-full border border-slate-300 grid place-items-center hover:bg-slate-100" aria-label="Mes siguiente"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
+      <div id="calGrid" class="no-print grid md:grid-cols-2 gap-8"></div>
+      <div id="dayPanel" class="no-print hidden mt-6 pt-5 border-t border-slate-200">
+        <div class="flex flex-wrap items-start justify-between gap-2 mb-2">
+          <div><h3 id="dayTitle" class="fd font-bold"></h3><p id="dayStats" class="text-sm text-slate-500"></p></div>
+          <button id="dayClose" class="no-print px-3 py-1 text-sm rounded-full border border-slate-300 hover:bg-slate-100">Cerrar</button>
+        </div>
+        <div style="height:260px"><canvas id="cDayDetail"></canvas></div>
+      </div>
+      <div id="calPrint" class="print-only"></div>
+    </section>
+
+    <section id="hypoSection" class="rounded-2xl bg-white border border-slate-200 p-4">
+      <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+        <h2 class="fd text-xl font-bold">Eventos de glucosa baja</h2>
+        <span id="hypoSummary" class="text-sm text-slate-500"></span>
+      </div>
+      <div id="hypoBody"></div>
+    </section>
+
+
+      </main>
+</div>
+
+<footer class="w-full border-t border-slate-300 mt-6">
+  <p class="max-w-6xl mx-auto px-4 py-4 text-sm text-slate-600 text-center">Herramienta informativa. Consultá a tu equipo médico antes de tomar decisiones sobre tu tratamiento.<span class="block mt-1 text-xs text-slate-500">Sin relación con Abbott. FreeStyle Libre y LibreView son marcas de Abbott.</span></p>
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const sg = (v, d) => { const t = fmt1(Math.abs(v), d); return (Number(t.replace(',', '.')) === 0 ? '' : v > 0 ? '+' : '−') + t; };
+let summaryText = '';
+const ar = d => d.split('-').reverse().join('/');   // AAAA-MM-DD -> DD/MM/AAAA
+const cap = t => t.charAt(0).toUpperCase() + t.slice(1);
+const p2 = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
+const fmt1 = (n, d=1) => n.toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d});
+
+const DEF = {vl: 54, lo: 70, hi: 180, vh: 250};
+let T = {...DEF};
+const isStd = () => Object.keys(DEF).every(k => T[k] === DEF[k]);
+const BANDS = [
+  {k:'vh', label:'Muy alto', get sub() { return '>' + T.vh; },             color:'#C2410C', test: v => v > T.vh},
+  {k:'h',  label:'Alto',     get sub() { return `${T.hi + 1}–${T.vh}`; }, color:'#f59e0b', test: v => v > T.hi && v <= T.vh},
+  {k:'r',  label:'En rango', get sub() { return `${T.lo}–${T.hi}`; },     color:'#0EA97A', test: v => v >= T.lo && v <= T.hi},
+  {k:'l',  label:'Bajo',     get sub() { return `${T.vl}–${T.lo - 1}`; }, color:'#ef4444', test: v => v >= T.vl && v < T.lo},
+  {k:'vl', label:'Muy bajo', get sub() { return '<' + T.vl; },             color:'#991b1b', test: v => v < T.vl},
+];
+
+Chart.defaults.font.family = "'Instrument Sans', system-ui, sans-serif"; Chart.defaults.color = '#64748b';
+let raw = [], records = [], charts = {}, calMonths = [], calIdx = 0, calDays = new Map(), selDay = null;
+
+/* ---------- Carga y parseo ---------- */
+function showErr(m) { $('err').textContent = m || ''; }
+
+function handleFile(f) {
+  if (!f) return;
+  showErr('');
+  Papa.parse(f, {skipEmptyLines: true, complete: r => load(r.data), error: e => showErr('No se pudo leer el archivo: ' + e.message)});
+}
+
+function load(rows) {
+  const hi = rows.findIndex(r => r.some(c => /timestamp|sello de (tiempo|hora)|marca de (tiempo|hora)|fecha y hora/i.test(c)) && r.some(c => /gluc/i.test(c)));
+  if (hi < 0) return showErr('No se reconoció el formato: no se encontró la fila de encabezados de LibreView.');
+  const h = rows[hi].map(s => (s || '').trim());
+  const find = re => h.findIndex(c => re.test(c));
+  const ti = find(/timestamp|sello de (tiempo|hora)|marca de (tiempo|hora)|fecha y hora/i);
+  const hist = find(/historic glucose|historial de glucosa/i);
+  const scan = find(/scan glucose|escane(o|ar) (de )?glucosa/i);
+  if (hist < 0 && scan < 0) return showErr('No se encontraron columnas de glucosa en el archivo.');
+  const mmol = /mmol/i.test(h[hist >= 0 ? hist : scan]);
+  const num = s => { const v = parseFloat(String(s ?? '').replace(',', '.')); return isNaN(v) ? null : (mmol ? v * 18.0182 : v); };
+  const re = /^(\d{1,4})[-\/.](\d{1,2})[-\/.](\d{1,4})[ T,]+(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap])?/i;
+
+  raw = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    let v = hist >= 0 ? num(r[hist]) : null, k = 'h';
+    if (v === null && scan >= 0) { v = num(r[scan]); k = 's'; }
+    if (v === null) continue;
+    const m = re.exec((r[ti] || '').trim());
+    if (!m) continue;
+    let H = +m[4]; const ap = (m[6] || '').toLowerCase();
+    if (ap === 'p' && H < 12) H += 12; if (ap === 'a' && H === 12) H = 0;
+    raw.push({a:+m[1], b:+m[2], c:+m[3], H, M:+m[5], v, k});
+  }
+  if (!raw.length) return showErr('El archivo no contiene lecturas de glucosa válidas.');
+  build(true);
+  $('upload').classList.add('hidden'); $('dash').classList.remove('hidden');
+  $('btnReset').classList.remove('hidden'); $('btnPrint').classList.remove('hidden'); $('btnCopy').classList.remove('hidden');
+}
+
+function build(resetRange) {
+  const f = $('fmt').value;
+  const mdy = f === 'mdy' || (f === 'auto' && raw.some(r => r.a < 1000 && r.b > 12) && !raw.some(r => r.a < 1000 && r.a > 12));
+  records = raw.map(r => {
+    let Y, Mo, D;
+    if (r.a >= 1000) { Y = r.a; Mo = r.b; D = r.c; }
+    else { Y = r.c < 100 ? r.c + 2000 : r.c; if (mdy) { Mo = r.a; D = r.b; } else { Mo = r.b; D = r.a; } }
+    return {t: new Date(Y, Mo - 1, D, r.H, r.M).getTime(), v: r.v, k: r.k};
+  }).filter(r => !isNaN(r.t)).sort((a, b) => a.t - b.t);
+  const min = iso(new Date(records[0].t)), max = iso(new Date(records[records.length - 1].t));
+  $('from').min = $('to').min = min; $('from').max = $('to').max = max;
+  if (resetRange) { $('from').value = min; $('to').value = max; setQ(document.querySelector('.q[data-d="0"]')); }
+  render();
+}
+
+/* ---------- Estadística ---------- */
+function pct(sorted, p) {
+  if (!sorted.length) return null;
+  const i = (sorted.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+
+function render() {
+  const from = new Date($('from').value + 'T00:00:00').getTime();
+  const to = new Date($('to').value + 'T23:59:59').getTime();
+  const useScans = $('scans').checked;
+  const data = records.filter(r => r.t >= from && r.t <= to && (useScans || r.k === 'h'));
+  const n = data.length;
+  $('periodo').textContent = `${ar($('from').value)} → ${ar($('to').value)}`;
+  if (!n) {
+    $('tube').innerHTML = ''; $('legend').innerHTML = ''; $('bigNum').textContent = '–'; $('verdict').textContent = 'No hay lecturas en este rango. Probá con otras fechas.';
+    $('cmp').textContent = ''; $('blocks').innerHTML = ''; $('hypoBody').innerHTML = ''; $('hypoSummary').textContent = ''; summaryText = '';
+    $('kpis').innerHTML = ''; calMonths = []; closeDay(); $('calGrid').innerHTML = ''; $('calPrint').innerHTML = ''; $('calTitle').textContent = ''; Object.values(charts).forEach(c => c.destroy()); charts = {};
+    return;
+  }
+  const vals = data.map(d => d.v);
+  const mean = vals.reduce((s, v) => s + v, 0) / n;
+  const sd = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
+  const cv = sd / mean * 100, gmi = 3.31 + 0.02392 * mean;
+  const counts = {}; BANDS.forEach(b => counts[b.k] = 0);
+  vals.forEach(v => { for (const b of BANDS) if (b.test(v)) { counts[b.k]++; break; } });
+  const share = k => counts[k] / n * 100;
+
+  const days = new Set(data.map(d => iso(new Date(d.t)))).size;
+  const hist = records.filter(r => r.t >= from && r.t <= to && r.k === 'h');
+  const t0 = Math.max(from, records[0].t), t1 = Math.min(to, records[records.length - 1].t);
+  const active = Math.min(100, hist.length / (Math.floor((t1 - t0) / 9e5) + 1) * 100);
+
+  const r = share('r');
+  $('bigNum').textContent = fmt1(r, 0);
+  $('unitNote').textContent = 'Valores en mg/dL' + (isStd() ? '' : ' (rangos personalizados)');
+  $('verdict').textContent = r >= 70 ? 'del tiempo en rango. Meta cumplida.' : 'del tiempo en rango. Meta: más de 70 %.';
+  const span = to - from + 1000, dN = Math.round(span / 864e5);
+  const prev = records.filter(x => x.t >= from - span && x.t < from && (useScans || x.k === 'h'));
+  let cmp = '';
+  if (prev.length && prev.length >= n * 0.5) {
+    const pv = prev.map(x => x.v), pm = pv.reduce((a, b) => a + b, 0) / pv.length;
+    const pr = pv.filter(v => v >= T.lo && v <= T.hi).length / pv.length * 100, pl = pv.filter(v => v < T.lo).length / pv.length * 100;
+    cmp = `vs. ${dN === 1 ? 'el día anterior' : 'los ' + dN + ' días anteriores'}: en rango ${sg(r - pr, 1)} pts, bajos ${sg(share('l') + share('vl') - pl, 1)} pts, promedio ${sg(mean - pm, 0)} mg/dL`;
+  }
+  $('cmp').textContent = cmp;
+  const order = [...BANDS].reverse();
+  $('tube').innerHTML = order.map(b => `<div title="${b.label}: ${fmt1(share(b.k))}%" class="grid place-items-center text-xs font-semibold" style="width:${share(b.k)}%;background:${b.color};color:${b.k === 'h' || b.k === 'r' ? '#14213D' : '#fff'}">${share(b.k) >= 5 ? fmt1(share(b.k), 0) + '%' : ''}</div>`).join('');
+  const mark = f => f ? '✓' : '✕', col = f => f ? '#5EEAD4' : '#FCD34D';
+  const meta = (txt, f) => `<br><span class="text-xs" style="color:${col(f)}">Meta: ${txt} ${mark(f)}</span>`;
+  const item = (k, extra = '') => {
+    const b = BANDS.find(x => x.k === k);
+    return `<div class="border-t-2 pt-2" style="border-color:${b.color}"><span class="fd text-2xl font-bold">${fmt1(share(k))}%</span><br><span class="text-indigo-100">${b.label}</span><br><span class="text-indigo-300">(${b.sub})</span>${extra}</div>`;
+  };
+  const group = (a, b, txt, tot, f) => `<div><div class="grid grid-cols-2 gap-x-4">${a}${b}</div><div class="mt-2 h-2 border-x-2 border-b-2 rounded-b" style="border-color:rgba(165,180,252,.6)"></div><p class="mt-1 text-center text-xs" style="color:${col(f)}">Total ${fmt1(tot)}% · Meta: ${txt} ${mark(f)}</p></div>`;
+  const lowT = share('l') + share('vl'), highT = share('h') + share('vh');
+  $('legend').innerHTML =
+    group(item('vl', meta('<1 %', share('vl') < 1)), item('l'), '<4 %', lowT, lowT < 4) +
+    `<div>${item('r', meta('>70 %', share('r') > 70))}</div>` +
+    group(item('h'), item('vh', meta('<5 %', share('vh') < 5)), '<25 %', highT, highT < 25);
+
+  const kpi = (t, v, s) => `<div class="p-5"><p class="text-sm text-slate-500">${t}</p><p class="fd text-3xl font-bold text-slate-900">${v}</p><p class="text-xs text-slate-500">${s}</p></div>`;
+  $('kpis').innerHTML =
+    kpi('Glucosa promedio', fmt1(mean, 0) + ' <span class="text-base font-medium">mg/dL</span>', `DE ${fmt1(sd, 0)} mg/dL`) +
+    kpi('GMI', fmt1(gmi) + '%', `${fmt1(12.71 + 4.70587 * mean / 18.0182, 0)} mmol/mol`) +
+    kpi('Variabilidad (CV)', fmt1(cv) + '%', 'meta ≤36 %') +
+    kpi('Sensor activo', fmt1(active, 0) + '%', `${n.toLocaleString('es-AR')} lecturas`);
+
+  drawAgp(data);
+  drawDaily(data);
+  drawCalendar(data);
+  drawBlocks(data);
+  const ev = drawHypo(data);
+  summaryText = [
+    'En Rango: resumen de glucosa',
+    `Período: ${ar($('from').value)} a ${ar($('to').value)} (${n.toLocaleString('es-AR')} lecturas, sensor activo ${fmt1(active, 0)} %)`,
+    `Glucosa promedio: ${fmt1(mean, 0)} mg/dL (DE ${fmt1(sd, 0)}, CV ${fmt1(cv)} %)`,
+    `GMI: ${fmt1(gmi)} % (${fmt1(12.71 + 4.70587 * mean / 18.0182, 0)} mmol/mol)`,
+    `En rango (${T.lo}-${T.hi} mg/dL): ${fmt1(share('r'))} %`,
+    `Alto (${T.hi + 1}-${T.vh}): ${fmt1(share('h'))} %, muy alto (>${T.vh}): ${fmt1(share('vh'))} %`,
+    `Bajo (${T.vl}-${T.lo - 1}): ${fmt1(share('l'))} %, muy bajo (<${T.vl}): ${fmt1(share('vl'))} %`,
+    `Eventos de glucosa baja: ${ev.length}`,
+    cmp ? 'Comparación ' + cmp : ''
+  ].filter(Boolean).join('\n');
+}
+
+/* ---------- Gráficos ---------- */
+function mk(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart($(id), cfg); }
+
+function drawAgp(data) {
+  const tl = `Rango meta ${T.lo}–${T.hi} mg/dL`;
+  const bins = Array.from({length: 48}, () => []);
+  data.forEach(d => { const dt = new Date(d.t); bins[Math.floor((dt.getHours() * 60 + dt.getMinutes()) / 30)].push(d.v); });
+  bins.forEach(b => b.sort((a, c) => a - c));
+  const P = p => bins.map(b => pct(b, p));
+  const labels = bins.map((_, i) => `${p2(Math.floor(i / 2))}:${i % 2 ? '30' : '00'}`);
+  const line = (label, d, o = {}) => ({label, data: d, pointRadius: 0, borderWidth: 0, tension: .35, ...o});
+  mk('cAgp', {
+    type: 'line',
+    data: {labels, datasets: [
+      line('_', P(.05)),
+      line('Percentil 5–95', P(.95), {fill: '-1', backgroundColor: 'rgba(99,102,241,.2)'}),
+      line('Mediana', P(.5), {borderWidth: 3, borderColor: '#14213D'}),
+      line(tl, labels.map(() => T.lo), {borderWidth: 1.5, borderColor: '#0EA97A', borderDash: [6, 4]}),
+      line('_', labels.map(() => T.hi), {borderWidth: 1.5, borderColor: '#0EA97A', borderDash: [6, 4]}),
+    ]},
+    options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
+      scales: {
+        y: {min: 0, suggestedMax: 350, title: {display: true, text: 'mg/dL'}},
+        x: {ticks: {callback(v, i) { return i % (this.chart.width < 520 ? 8 : 4) === 0 ? labels[i] : ''; }, maxRotation: 0, autoSkip: false},
+          grid: {color: c => c.index % (c.chart.width < 520 ? 8 : 4) === 0 ? 'rgba(100,116,139,.18)' : 'transparent'}}
+      },
+      plugins: {
+        legend: {labels: {filter: i => i.text !== '_'}},
+        tooltip: {filter: i => !['_', tl].includes(i.dataset.label), callbacks: {label: c => `${c.dataset.label}: ${fmt1(c.parsed.y, 0)}`}}
+      }}
+  });
+}
+
+function drawCalendar(data) {
+  closeDay(); calDays = new Map();
+  const g = Math.max(T.lo, Math.min(154, T.hi));
+  const sw = (c, t) => `<span><i class="inline-block w-3 h-3 rounded align-middle" style="background:${c}"></i> ${t}</span>`;
+  $('calLegend').innerHTML = sw('#fecaca', `&lt;${T.lo}`) + sw('#bbf7d0', `${T.lo}–${g}`) + (T.hi > g ? sw('#fde68a', `${g + 1}–${T.hi}`) : '') + sw('#fdba74', `&gt;${T.hi}`) + `<span><span class="text-red-700">●</span> lectura &lt;${T.lo}</span>`;
+  const m = new Map();
+  data.forEach(d => {
+    const dt = new Date(d.t), k = iso(dt), o = m.get(k) || {s: 0, n: 0, r: 0, lo: Infinity};
+    (calDays.get(k) || calDays.set(k, []).get(k)).push({h: dt.getHours() + dt.getMinutes() / 60, v: d.v});
+    o.s += d.v; o.n++; if (d.v >= T.lo && d.v <= T.hi) o.r++; o.lo = Math.min(o.lo, d.v); m.set(k, o);
+  });
+  const keys = [...m.keys()].sort();
+  const first = new Date(keys[0] + 'T00:00:00'), last = new Date(keys[keys.length - 1] + 'T00:00:00');
+  const cur = new Date(first.getFullYear(), first.getMonth(), 1);
+  calMonths = [];
+  while (cur <= last) {
+    const y = cur.getFullYear(), mo = cur.getMonth(), nd = new Date(y, mo + 1, 0).getDate(), off = (new Date(y, mo, 1).getDay() + 6) % 7;
+    let cells = '<div></div>'.repeat(off);
+    for (let d = 1; d <= nd; d++) {
+      const key = `${y}-${p2(mo + 1)}-${p2(d)}`, o = m.get(key);
+      if (!o) { cells += `<div class="rounded-lg p-1.5 bg-slate-50 text-slate-300 text-xs" style="min-height:3.4rem">${d}</div>`; continue; }
+      const avg = o.s / o.n, bg = avg < T.lo ? '#fecaca' : avg <= g ? '#bbf7d0' : avg <= T.hi ? '#fde68a' : '#fdba74';
+      cells += `<button type="button" data-day="${key}" class="rounded-lg p-1.5 text-left hover:brightness-95" style="background:${bg};min-height:3.6rem" title="${p2(d)}/${p2(mo + 1)}/${y}: promedio ${fmt1(avg, 0)} mg/dL, ${fmt1(o.r / o.n * 100, 0)} % en rango"><div class="text-xs text-slate-600">${d}${o.lo < T.lo ? ' <span class="text-red-700">●</span>' : ''}</div><div class="fd font-bold text-lg leading-tight">${fmt1(avg, 0)}</div><div class="text-[11px] text-slate-600">${fmt1(o.r / o.n * 100, 0)}%</div></button>`;
+    }
+    calMonths.push({
+      title: cap(cur.toLocaleDateString('es-AR', {month: 'long', year: 'numeric'})),
+      html: `<div class="grid grid-cols-7 gap-1 text-xs text-center text-slate-500 mb-1">${['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map(x => `<span>${x}</span>`).join('')}</div><div class="grid grid-cols-7 gap-1">${cells}</div>`
+    });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  $('calPrint').innerHTML = calMonths.map(c => `<div class="month"><h3 class="fd font-bold mb-2">${c.title}</h3>${c.html}</div>`).join('');
+  calIdx = Math.max(0, calMonths.length - calPer()); showCal();
+}
+
+// Pinta la línea según la altura (no por tramo): verde dentro del objetivo, ámbar arriba, rojo abajo, con corte exacto en cada umbral.
+const ZONES = {id: 'zones', beforeDatasetsDraw(chart) {
+  const a = chart.chartArea, y = chart.scales.y, meta = chart.getDatasetMeta(2);
+  if (!a || !meta.dataset) return;
+  const g = chart.ctx.createLinearGradient(0, a.bottom, 0, a.top);
+  const f = v => Math.min(1, Math.max(0, (a.bottom - y.getPixelForValue(v)) / (a.bottom - a.top)));
+  [[0, '#EF4444'], [f(T.lo), '#EF4444'], [f(T.lo), '#0EA97A'], [f(T.hi), '#0EA97A'], [f(T.hi), '#F59E0B'], [1, '#F59E0B']].forEach(([o, c]) => g.addColorStop(o, c));
+  meta.dataset.options.borderColor = g;
+}};
+
+function markSel() {
+  document.querySelectorAll('#calGrid [data-day]').forEach(b => b.classList.toggle('sel', b.dataset.day === selDay));
+}
+
+function closeDay() {
+  selDay = null; $('dayPanel').classList.add('hidden');
+  if (charts.cDayDetail) { charts.cDayDetail.destroy(); delete charts.cDayDetail; }
+  markSel();
+}
+
+function openDay(key) {
+  const r = (calDays.get(key) || []).sort((a, b) => a.h - b.h);
+  if (!r.length) return;
+  selDay = key; markSel();
+  const vals = r.map(x => x.v), avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const inR = vals.filter(v => v >= T.lo && v <= T.hi).length / vals.length * 100;
+  $('dayTitle').textContent = cap(new Date(key + 'T00:00:00').toLocaleDateString('es-AR', {weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'}));
+  $('dayStats').textContent = `Promedio ${fmt1(avg, 0)}, mínimo ${fmt1(Math.min(...vals), 0)}, máximo ${fmt1(Math.max(...vals), 0)} mg/dL, ${fmt1(inR, 0)} % en rango`;
+  $('dayPanel').classList.remove('hidden');
+  mk('cDayDetail', {
+    type: 'line',
+    data: {datasets: [
+      {label: '_', data: [{x: 0, y: T.lo}, {x: 24, y: T.lo}], pointRadius: 0, borderWidth: 0},
+      {label: '_', data: [{x: 0, y: T.hi}, {x: 24, y: T.hi}], pointRadius: 0, borderWidth: 0, fill: '-1', backgroundColor: 'rgba(16,185,129,.12)'},
+      {label: 'Glucosa', data: r.map(x => ({x: x.h, y: x.v})), pointRadius: 0, borderWidth: 2.5, cubicInterpolationMode: 'monotone', borderColor: '#0EA97A'},
+    ]},
+    options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'nearest', axis: 'x', intersect: false},
+      scales: {
+        x: {type: 'linear', min: 0, max: 24, ticks: {stepSize: 3, maxRotation: 0, autoSkip: false, callback(v) { return v % (this.chart.width < 520 ? 6 : 3) === 0 ? `${p2(v)}:00` : ''; }}},
+        y: {min: 0, suggestedMax: 350, title: {display: true, text: 'mg/dL'}}
+      },
+      plugins: {legend: {display: false}, tooltip: {filter: i => i.dataset.label === 'Glucosa', callbacks: {
+        title: i => { const h = i[0].parsed.x; return `${p2(Math.floor(h))}:${p2(Math.round((h % 1) * 60) % 60)}`; },
+        label: c => `${fmt1(c.parsed.y, 0)} mg/dL`}}}},
+    plugins: [ZONES]
+  });
+  $('dayPanel').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// Meses visibles a la vez: 2 en pantallas anchas, 1 en el celular
+const calPer = () => window.matchMedia('(min-width: 768px)').matches ? 2 : 1;
+
+function showCal() {
+  const per = calPer(), win = calMonths.slice(calIdx, calIdx + per);
+  $('calGrid').innerHTML = win.map(c => `<div><h3 class="fd font-bold mb-2">${c.title}</h3>${c.html}</div>`).join('');
+  $('calTitle').textContent = calMonths.length <= per ? '' : per === 1 ? `Mes ${calIdx + 1} de ${calMonths.length}` : `Meses ${calIdx + 1}–${calIdx + win.length} de ${calMonths.length}`;
+  markSel();
+  $('calPrev').disabled = calIdx === 0; $('calNext').disabled = calIdx + per >= calMonths.length;
+}
+
+function fmtDur(min) {
+  min = Math.round(min);
+  return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+}
+
+// Evento: 2 o más lecturas automáticas seguidas bajo el límite inferior (al menos 15 min).
+function hypoEvents(data) {
+  const ev = []; let cur = null;
+  const close = () => { if (cur && cur.n >= 2) ev.push(cur); cur = null; };
+  for (const d of data) {
+    if (d.k !== 'h') continue;
+    if (d.v < T.lo) {
+      if (cur && d.t - cur.last <= 20 * 60e3) { cur.last = d.t; cur.n++; cur.min = Math.min(cur.min, d.v); }
+      else { close(); cur = {start: d.t, last: d.t, n: 1, min: d.v}; }
+    } else close();
+  }
+  close();
+  return ev;
+}
+
+function drawHypo(data) {
+  const ev = hypoEvents(data);
+  if (!ev.length) {
+    $('hypoSummary').textContent = `<${T.lo} por 15 min o más`;
+    $('hypoBody').innerHTML = '<p class="text-slate-500">Sin eventos en el período.</p>';
+    return ev;
+  }
+  const avg = ev.reduce((a, e) => a + (e.last - e.start) / 6e4, 0) / ev.length;
+  $('hypoSummary').textContent = `${ev.length} ${ev.length === 1 ? 'evento' : 'eventos'}, duración promedio ${fmtDur(avg)}. <${T.lo} por 15 min o más`;
+  const rows = ev.slice().reverse().slice(0, 40).map(e => {
+    const dt = new Date(e.start);
+    return `<tr class="border-t border-slate-100"><td class="py-1.5 pr-4">${dt.toLocaleDateString('es-AR', {weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'})}</td><td class="pr-4">${p2(dt.getHours())}:${p2(dt.getMinutes())}</td><td class="pr-4">${fmtDur((e.last - e.start) / 6e4)}</td><td class="text-right font-semibold" style="color:${e.min < T.vl ? '#991b1b' : '#dc2626'}">${fmt1(e.min, 0)}</td></tr>`;
+  }).join('');
+  $('hypoBody').innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="text-left text-xs text-slate-500"><th class="pb-1 pr-4 font-medium">Fecha</th><th class="pb-1 pr-4 font-medium">Inicio</th><th class="pb-1 pr-4 font-medium">Duración</th><th class="pb-1 text-right font-medium">Mínimo (mg/dL)</th></tr></thead><tbody>${rows}</tbody></table></div>` +
+    (ev.length > 40 ? '<p class="mt-2 text-xs text-slate-500">Se muestran los 40 más recientes.</p>' : '');
+  return ev;
+}
+
+function drawBlocks(data) {
+  const names = [['Madrugada', '00–06'], ['Mañana', '06–12'], ['Tarde', '12–18'], ['Noche', '18–24']];
+  const order = [...BANDS].reverse();
+  $('blocks').innerHTML = names.map(([nm, rg], i) => {
+    const part = data.filter(d => Math.floor(new Date(d.t).getHours() / 6) === i);
+    const head = `<p class="text-sm font-medium text-slate-700">${nm}</p><p class="text-xs text-slate-500 mb-1">${rg} h</p>`;
+    if (!part.length) return `<div class="rounded-xl border border-slate-200 p-3">${head}<p class="text-slate-500">Sin datos</p></div>`;
+    const c = {}; BANDS.forEach(b => c[b.k] = 0);
+    let sum = 0;
+    part.forEach(d => { sum += d.v; for (const b of BANDS) if (b.test(d.v)) { c[b.k]++; break; } });
+    const sh = k => c[k] / part.length * 100;
+    return `<div class="rounded-xl border border-slate-200 p-3">${head}<p class="fd text-2xl font-bold text-slate-900">${fmt1(sum / part.length, 0)}</p><div class="mt-2 flex h-2.5 rounded-full overflow-hidden bg-slate-100">${order.map(b => `<div title="${b.label}: ${fmt1(sh(b.k))}%" style="width:${sh(b.k)}%;background:${b.color}"></div>`).join('')}</div><p class="mt-1 text-xs text-slate-500">${fmt1(sh('r'), 0)} % en rango</p></div>`;
+  }).join('');
+}
+
+function drawDaily(data) {
+  const m = new Map();
+  data.forEach(d => {
+    const k = iso(new Date(d.t)), o = m.get(k) || {s: 0, n: 0, lo: Infinity, hi: -Infinity};
+    o.s += d.v; o.n++; o.lo = Math.min(o.lo, d.v); o.hi = Math.max(o.hi, d.v); m.set(k, o);
+  });
+  const keys = [...m.keys()].sort(), g = f => keys.map(k => f(m.get(k)));
+  mk('cDay', {
+    type: 'line',
+    data: {labels: keys, datasets: [
+      {label: '_', data: g(o => o.lo), pointRadius: 0, borderWidth: 0},
+      {label: 'Mín–máx', data: g(o => o.hi), pointRadius: 0, borderWidth: 0, fill: '-1', backgroundColor: 'rgba(100,116,139,.18)'},
+      {label: 'Promedio diario', data: g(o => o.s / o.n), borderColor: '#14213D', backgroundColor: '#14213D', borderWidth: 2, pointRadius: keys.length > 60 ? 0 : 3, tension: .25},
+      {label: '_lo', data: keys.map(() => T.lo), pointRadius: 0, borderWidth: 1.5, borderColor: '#0EA97A', borderDash: [6, 4]},
+      {label: '_hi', data: keys.map(() => T.hi), pointRadius: 0, borderWidth: 1.5, borderColor: '#0EA97A', borderDash: [6, 4]},
+    ]},
+    options: {responsive: true, maintainAspectRatio: false, animation: false, interaction: {mode: 'index', intersect: false},
+      scales: {y: {min: 0, suggestedMax: 350, title: {display: true, text: 'mg/dL'}}, x: {ticks: {maxTicksLimit: 12, maxRotation: 0, autoSkipPadding: 20, callback(v) { const l = this.getLabelForValue(v); return keys.length > 400 ? `${l.slice(5, 7)}/${l.slice(2, 4)}` : `${l.slice(8, 10)}/${l.slice(5, 7)}`; }}}},
+      plugins: {legend: {labels: {filter: i => !['_', '_lo', '_hi'].includes(i.text)}},
+        tooltip: {filter: i => !['_', '_lo', '_hi'].includes(i.dataset.label), callbacks: {title: i => ar(i[0].label), label: c => `${c.dataset.label}: ${fmt1(c.parsed.y, 0)}`}}}}
+  });
+}
+
+/* ---------- Eventos ---------- */
+const drop = $('drop');
+['dragenter', 'dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => handleFile(ev.dataTransfer.files[0]));
+$('file').addEventListener('change', ev => handleFile(ev.target.files[0]));
+const setQ = b => document.querySelectorAll('.q').forEach(x => x.classList.toggle('on', x === b));
+['from', 'to'].forEach(id => $(id).addEventListener('change', () => { setQ(null); render(); }));
+$('scans').addEventListener('change', render);
+$('fmt').addEventListener('change', () => build(true));
+$('quick').addEventListener('click', ev => {
+  const b = ev.target.closest('.q'); if (!b) return;
+  const d = +b.dataset.d, max = new Date($('to').max + 'T00:00:00');
+  const start = d ? new Date(max.getTime() - (d - 1) * 864e5) : new Date($('from').min + 'T00:00:00');
+  $('to').value = $('to').max;
+  $('from').value = iso(start) < $('from').min ? $('from').min : iso(start);
+  setQ(b); render();
+});
+$('calGrid').addEventListener('click', ev => { const b = ev.target.closest('[data-day]'); if (b) openDay(b.dataset.day); });
+$('dayClose').addEventListener('click', closeDay);
+const RANGOS_KEY = 'enrango.rangos';
+function saveT() {
+  try { isStd() ? localStorage.removeItem(RANGOS_KEY) : localStorage.setItem(RANGOS_KEY, JSON.stringify(T)); } catch {}
+}
+function loadT() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RANGOS_KEY));
+    if (v && [v.vl, v.lo, v.hi, v.vh].every(Number.isInteger) && v.vl >= 20 && v.vl < v.lo && v.lo < v.hi && v.hi < v.vh && v.vh <= 600) T = {vl: v.vl, lo: v.lo, hi: v.hi, vh: v.vh};
+  } catch {}
+}
+function syncT() {
+  $('tVl').value = T.vl; $('tLo').value = T.lo; $('tHi').value = T.hi; $('tVh').value = T.vh;
+  $('tReset').classList.toggle('hidden', isStd());
+}
+function readT() {
+  const v = ['tVl', 'tLo', 'tHi', 'tVh'].map(id => parseInt($(id).value, 10));
+  const ok = v.every(Number.isFinite) && v[0] >= 20 && v[0] < v[1] && v[1] < v[2] && v[2] < v[3] && v[3] <= 600;
+  if (!ok) { $('tErr').textContent = 'Los valores deben ir de menor a mayor.'; syncT(); return; }
+  $('tErr').textContent = '';
+  T = {vl: v[0], lo: v[1], hi: v[2], vh: v[3]}; saveT(); syncT(); render();
+}
+['tVl', 'tLo', 'tHi', 'tVh'].forEach(id => $(id).addEventListener('change', readT));
+$('tReset').addEventListener('click', () => { T = {...DEF}; $('tErr').textContent = ''; saveT(); syncT(); render(); });
+$('btnCopy').addEventListener('click', async () => {
+  if (!summaryText) return;
+  let ok = false;
+  try { await navigator.clipboard.writeText(summaryText); ok = true; } catch {}
+  if (!ok) {
+    const ta = document.createElement('textarea');
+    ta.value = summaryText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+  const b = $('btnCopy'), t = b.textContent;
+  b.textContent = ok ? '¡Copiado!' : 'No se pudo copiar';
+  setTimeout(() => { b.textContent = t; }, 1800);
+});
+loadT(); syncT();
+$('calPrev').addEventListener('click', () => { calIdx = Math.max(0, calIdx - calPer()); showCal(); });
+$('calNext').addEventListener('click', () => { calIdx = Math.min(Math.max(0, calMonths.length - calPer()), calIdx + calPer()); showCal(); });
+// Si cambia el ancho (girar el teléfono, abrir el modo celular): al pasar a 1 mes se queda el más reciente de los dos; al pasar a 2, el mes que se veía queda como el último.
+let calPerPrev = calPer();
+if (window.matchMedia) window.matchMedia('(min-width: 768px)').addEventListener('change', () => {
+  const per = calPer();
+  if (per === calPerPrev) return;
+  calIdx = per === 1 ? Math.min(calIdx + 1, calMonths.length - 1) : Math.max(0, Math.min(calIdx - 1, calMonths.length - 2));
+  calPerPrev = per; showCal();
+});
+// Al imprimir, los gráficos se redibujan al ancho de la hoja A4 (en el celular quedaban del ancho de la pantalla).
+const mmToPx = mm => { const d = document.createElement('div'); d.style.cssText = `position:absolute;visibility:hidden;width:${mm}mm`; document.body.appendChild(d); const w = d.getBoundingClientRect().width; d.remove(); return w; };
+window.addEventListener('beforeprint', () => {
+  const w = Math.floor(mmToPx(210 - 24) - 64);   // hoja menos márgenes (12 mm) y relleno de página y tarjeta
+  Object.values(charts).forEach(c => { if (c.canvas.offsetParent) c.resize(w, c.canvas.parentElement.clientHeight); });
+});
+window.addEventListener('afterprint', () => Object.values(charts).forEach(c => c.resize()));
+$('btnPrint').addEventListener('click', () => window.print());
+$('btnReset').addEventListener('click', () => {
+  raw = []; records = []; $('file').value = ''; showErr('');
+  Object.values(charts).forEach(c => c.destroy()); charts = {};
+  $('dash').classList.add('hidden'); $('upload').classList.remove('hidden');
+  $('btnReset').classList.add('hidden'); $('btnPrint').classList.add('hidden'); $('btnCopy').classList.add('hidden');
+});
+$('btnDemo').addEventListener('click', () => {
+  const rows = [['Glucose Data', 'Generated on'], ['Device', 'Serial Number', 'Device Timestamp', 'Record Type', 'Historic Glucose mg/dL', 'Scan Glucose mg/dL']];
+  const s = new Date(); s.setDate(s.getDate() - 120); s.setHours(0, 0, 0, 0);
+  for (let t = s.getTime(); t < Date.now(); t += 9e5) {
+    const d = new Date(t), h = d.getHours() + d.getMinutes() / 60;
+    let g = 125 + 30 * Math.exp(-((h - 9) ** 2) / 2) + 35 * Math.exp(-((h - 14.5) ** 2) / 2) + 45 * Math.exp(-((h - 21) ** 2) / 2) - 20 * Math.exp(-((h - 4) ** 2) / 3) + (Math.random() - .5) * 50;
+    rows.push(['Demo', 'X', `${p2(d.getDate())}-${p2(d.getMonth() + 1)}-${d.getFullYear()} ${p2(d.getHours())}:${p2(d.getMinutes())}`, '0', Math.max(40, Math.round(g)), '']);
+  }
+  load(rows);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Imagen de vista previa (1200 x 630)</title><style>
+/* Se abre en el navegador y se captura a 1200x630 px. Requiere haber corrido npm install (usa las fuentes de node_modules). */
+@font-face{font-family:'Bricolage Grotesque';font-weight:800;src:url(../node_modules/@fontsource/bricolage-grotesque/files/bricolage-grotesque-latin-800-normal.woff2) format('woff2')}
+@font-face{font-family:'Instrument Sans';font-weight:500;src:url(../node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Instrument Sans';font-weight:600;src:url(../node_modules/@fontsource/instrument-sans/files/instrument-sans-latin-600-normal.woff2) format('woff2')}
+*{box-sizing:border-box;margin:0}
+body{width:1200px;height:630px;background:#14213D;color:#fff;font-family:'Instrument Sans',sans-serif;padding:64px 72px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+body::before{content:"";position:absolute;right:-180px;top:-220px;width:620px;height:620px;border-radius:50%;background:radial-gradient(circle,#2a3a74 0%,rgba(20,33,61,0) 70%)}
+.fd{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}
+.top{display:flex;align-items:center;gap:28px;position:relative}
+.name{font-size:104px;font-weight:800;line-height:1}
+h2{font-size:78px;font-weight:800;line-height:1.08;position:relative;max-width:1020px}
+h2 span{color:#5EEAD4}
+.foot{display:flex;flex-direction:column;gap:10px;font-size:32px;font-weight:500;color:#C7D2FE;position:relative}
+.dom{color:#5EEAD4;font-weight:600}
+</style></head><body>
+<div class="top">
+  <svg width="116" height="116" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#0c1530" stroke="#2f3f78" stroke-width=".6"/><path d="M6 24c4 0 4-9 8-9s4 12 8 12 4-14 8-14 2 11 4 11" fill="none" stroke="#5EEAD4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <div class="name fd">En Rango</div>
+</div>
+<h2 class="fd">Informe <span>personalizado</span><br>de glucosa</h2>
+<div class="foot"><span>Cargá el archivo de LibreView. Se procesa en tu navegador.</span><span class="dom">enrango.netlify.app</span></div>
+</body></html>
