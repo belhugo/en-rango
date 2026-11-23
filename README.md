@@ -6,6 +6,8 @@
 
 > Herramienta informativa, sin relación con Abbott. FreeStyle Libre y LibreView son marcas de Abbott. No es un producto sanitario ni reemplaza el informe oficial ni la interpretación de un profesional de la salud.
 
+*[English summary below](#in-english)*
+
 <!-- Agregá acá una captura: docs/captura.png (hacela con los datos de ejemplo, nunca con datos reales) -->
 
 ## Qué hace
@@ -80,13 +82,15 @@ Hacen falta Node.js y Python 3. Para publicar, subí la carpeta `dist/` a Netlif
 - [x] Política de seguridad probada en un navegador real, sin bloqueos ni errores de consola.
 - [x] Impresión probada en un teléfono real.
 
-## Cómo se hizo
-
-Proyecto diseñado y desarrollado por **[tu nombre]** con asistencia de IA (Claude, de Anthropic): [contá acá qué problema detectaste, qué decisiones tomaste y cómo lo probaste].
-
 ## Licencia
 
-A definir.
+[MIT](LICENSE): se puede usar, copiar, modificar y distribuir, incluso con fines comerciales, conservando el aviso de copyright.
+
+Dependencias de terceros: Chart.js, PapaParse y Tailwind CSS (MIT); fuentes Bricolage Grotesque e Instrument Sans (SIL Open Font License). FreeStyle Libre y LibreView son marcas de Abbott; este proyecto no tiene relación con ella.
+
+## Autor
+
+Desarrollado por [HB Systems](https://hbsystems.com.ar/), con asistencia de IA (Claude, de Anthropic).
 
 ---
 

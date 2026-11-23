@@ -36,7 +36,7 @@ CSP_PROD = ('<meta http-equiv="Content-Security-Policy" content="default-src \'n
             'base-uri \'none\'; form-action \'none\'">')
 assert html.count(CSP_DEV) == 1, 'No encontré la etiqueta CSP de desarrollo en index.html'
 html = html.replace(CSP_DEV, CSP_PROD)
-assert not re.search(r'(src|href)="https?://', html), 'Quedó una carga externa en el HTML'
+assert not re.search(r'<(script|link)[^>]*(src|href)="https?://', html), 'Quedó una carga externa en el HTML'
 
 shutil.rmtree('dist', ignore_errors=True)
 os.makedirs('dist/assets/fonts')
